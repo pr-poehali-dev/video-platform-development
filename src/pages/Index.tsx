@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
+import { toast } from 'sonner';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
-type Screen = 'auth' | 'home' | 'discover' | 'channel' | 'upload' | 'watch';
+type Screen = 'auth' | 'home' | 'discover' | 'channels' | 'channel' | 'upload' | 'watch';
 
 interface Video {
   id: number;
@@ -14,6 +15,7 @@ interface Video {
   views: string;
   time: string;
   thumb: string | null;
+  videoUrl: string | null;
   color: string;
   premiere?: boolean;
   scheduled?: boolean;
@@ -26,8 +28,13 @@ interface Account {
   color: string;
 }
 
+interface RegisteredChannel extends Account {
+  joinedAt: string;
+}
+
 const ACCOUNT_KEY = 'volna_account';
 const VIDEOS_KEY = 'volna_videos';
+const REGISTERED_KEY = 'volna_registered';
 const PALETTE = ['82 84% 55%', '322 90% 60%', '265 85% 62%'];
 
 function loadAccount(): Account | null {
@@ -42,6 +49,15 @@ function loadAccount(): Account | null {
 function loadVideos(): Video[] {
   try {
     const raw = localStorage.getItem(VIDEOS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadRegistered(): RegisteredChannel[] {
+  try {
+    const raw = localStorage.getItem(REGISTERED_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -71,22 +87,53 @@ export default function Index() {
   const nav = [
     { id: 'home', label: 'Главная', icon: 'House' },
     { id: 'discover', label: 'Новое', icon: 'Compass' },
+    { id: 'channels', label: 'Каналы', icon: 'Users' },
     { id: 'channel', label: 'Мой канал', icon: 'User' },
     { id: 'upload', label: 'Загрузить', icon: 'Upload' },
   ] as const;
 
   const openVideo = (v: Video) => { setActiveVideo(v); setScreen('watch'); window.scrollTo(0, 0); };
 
+  const registerChannel = (acc: Account) => {
+    const registered = loadRegistered();
+    if (!registered.some((c) => c.email === acc.email)) {
+      const next = [...registered, { ...acc, joinedAt: new Date().toISOString() }];
+      localStorage.setItem(REGISTERED_KEY, JSON.stringify(next));
+    }
+  };
+
   const handleEnter = (form: { channelName: string; email: string }) => {
-    const existing = loadAccount();
+    const registered = loadRegistered();
+    const found = registered.find((c) => c.email === form.email);
+
+    if (isLogin && !found) {
+      toast.error('Аккаунт не найден', { description: 'Проверь почту или зарегистрируйся' });
+      return;
+    }
+
     const acc: Account = {
-      channelName: isLogin ? (existing?.channelName || form.channelName || form.email.split('@')[0]) : form.channelName,
+      channelName: isLogin ? (found?.channelName || form.channelName || form.email.split('@')[0]) : form.channelName,
       email: form.email,
-      color: existing?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
+      color: found?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
     };
     localStorage.setItem(ACCOUNT_KEY, JSON.stringify(acc));
+    registerChannel(acc);
     setAccount(acc);
     setScreen('channel');
+  };
+
+  const handleOAuth = (provider: 'Google' | 'Telegram') => {
+    const email = `${provider.toLowerCase()}_user_${Math.floor(Math.random() * 10000)}@${provider.toLowerCase()}.com`;
+    const acc: Account = {
+      channelName: `${provider} пользователь`,
+      email,
+      color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    };
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(acc));
+    registerChannel(acc);
+    setAccount(acc);
+    setScreen('channel');
+    toast.success(`Вход через ${provider} выполнен`);
   };
 
   const handlePublish = (video: Video) => {
@@ -107,7 +154,7 @@ export default function Index() {
   if (!checkedSession) return null;
 
   if (screen === 'auth' || !account) {
-    return <Auth isLogin={isLogin} setIsLogin={setIsLogin} onEnter={handleEnter} />;
+    return <Auth isLogin={isLogin} setIsLogin={setIsLogin} onEnter={handleEnter} onOAuth={handleOAuth} />;
   }
 
   const myVideos = videos.filter((v) => v.channel === account.channelName);
@@ -118,6 +165,7 @@ export default function Index() {
       <main className="flex-1">
         {screen === 'home' && <Home videos={videos} openVideo={openVideo} goUpload={() => setScreen('upload')} />}
         {screen === 'discover' && <Discover videos={videos} account={account} openVideo={openVideo} />}
+        {screen === 'channels' && <ChannelsList account={account} />}
         {screen === 'channel' && <Channel account={account} myVideos={myVideos} goUpload={() => setScreen('upload')} openVideo={openVideo} />}
         {screen === 'upload' && <Upload account={account} onPublish={handlePublish} onCancel={() => setScreen('channel')} />}
         {screen === 'watch' && activeVideo && (
@@ -157,7 +205,7 @@ function EmptyState({ icon, title, text, action }: { icon: string; title: string
   );
 }
 
-function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: (v: boolean) => void; onEnter: (form: { channelName: string; email: string }) => void }) {
+function Auth({ isLogin, setIsLogin, onEnter, onOAuth }: { isLogin: boolean; setIsLogin: (v: boolean) => void; onEnter: (form: { channelName: string; email: string }) => void; onOAuth: (provider: 'Google' | 'Telegram') => void }) {
   const [channelName, setChannelName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -217,8 +265,8 @@ function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: 
             <div className="h-px flex-1 bg-border" /> или через <div className="h-px flex-1 bg-border" />
           </div>
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <Button variant="outline" className="h-12 rounded-xl border-border"><Icon name="Chrome" size={18} className="mr-2" />Google</Button>
-            <Button variant="outline" className="h-12 rounded-xl border-border"><Icon name="Send" size={18} className="mr-2" />Telegram</Button>
+            <Button type="button" onClick={() => onOAuth('Google')} variant="outline" className="h-12 rounded-xl border-border"><Icon name="Chrome" size={18} className="mr-2" />Google</Button>
+            <Button type="button" onClick={() => onOAuth('Telegram')} variant="outline" className="h-12 rounded-xl border-border"><Icon name="Send" size={18} className="mr-2" />Telegram</Button>
           </div>
         </div>
       </div>
@@ -328,6 +376,41 @@ function Home({ videos, openVideo, goUpload }: { videos: Video[]; openVideo: (v:
   );
 }
 
+function ChannelsList({ account }: { account: Account }) {
+  const registered = loadRegistered().filter((c) => c.email !== account.email);
+  const videos = loadVideos();
+  const countFor = (channelName: string) => videos.filter((v) => v.channel === channelName).length;
+
+  return (
+    <div className="container py-8">
+      <div className="mb-10 animate-float-up">
+        <span className="text-sm font-600 text-secondary uppercase tracking-widest">Сообщество</span>
+        <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1">Зарегистрированные каналы</h1>
+      </div>
+
+      {registered.length === 0 ? (
+        <EmptyState
+          icon="Users"
+          title="Пока только ты"
+          text="Как только зарегистрируются другие авторы, их каналы появятся в этом списке."
+        />
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {registered.map((c, i) => (
+            <div key={c.email} className="rounded-3xl border border-border p-6 text-center grain animate-float-up hover:border-primary transition-colors" style={{ animationDelay: `${i * 60}ms` }}>
+              <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center font-display text-2xl font-600" style={{ background: `hsl(${c.color})`, color: '#111' }}>
+                {c.channelName[0]?.toUpperCase()}
+              </div>
+              <h3 className="font-600 mt-3 truncate">{c.channelName}</h3>
+              <p className="text-xs text-muted-foreground">{countFor(c.channelName)} видео</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Discover({ videos, account, openVideo }: { videos: Video[]; account: Account; openVideo: (v: Video) => void }) {
   const othersVideos = videos.filter((v) => v.channel !== account.channelName);
   return (
@@ -418,7 +501,7 @@ function Channel({ account, myVideos, goUpload, openVideo }: { account: Account;
   );
 }
 
-function VideoFilePicker({ onSelect }: { onSelect: (fileName: string) => void }) {
+function VideoFilePicker({ onSelect }: { onSelect: (fileName: string, url: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -427,7 +510,8 @@ function VideoFilePicker({ onSelect }: { onSelect: (fileName: string) => void })
     const file = files?.[0];
     if (file) {
       setFileName(file.name);
-      onSelect(file.name);
+      const url = URL.createObjectURL(file);
+      onSelect(file.name, url);
     }
   };
 
@@ -510,11 +594,19 @@ function Upload({ account, onPublish, onCancel }: { account: Account; onPublish:
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [thumb, setThumb] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
 
   const publish = () => {
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      toast.error('Укажи название видео');
+      return;
+    }
+    if (!videoUrl) {
+      toast.error('Выбери файл видео');
+      return;
+    }
     const video: Video = {
       id: Date.now(),
       title: title.trim(),
@@ -523,12 +615,14 @@ function Upload({ account, onPublish, onCancel }: { account: Account; onPublish:
       views: '0',
       time: mode === 'now' ? 'только что' : date && time ? `${date} в ${time}` : 'скоро',
       thumb,
+      videoUrl,
       color: account.color,
       premiere: mode === 'premiere',
       scheduled: mode === 'schedule',
       publishAt: mode !== 'now' ? `${date} ${time}`.trim() : undefined,
     };
     onPublish(video);
+    toast.success('Видео опубликовано');
   };
 
   return (
@@ -538,7 +632,7 @@ function Upload({ account, onPublish, onCancel }: { account: Account; onPublish:
         <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1 mb-8">Загрузка видео</h1>
       </div>
 
-      <VideoFilePicker onSelect={() => {}} />
+      <VideoFilePicker onSelect={(_, url) => setVideoUrl(url)} />
 
       <div className="grid sm:grid-cols-[200px_1fr] gap-6 mt-8">
         <div>
@@ -594,24 +688,37 @@ function Watch({ video, videos, subscribed, setSubscribed, liked, setLiked, open
   video: Video; videos: Video[]; subscribed: boolean; setSubscribed: (v: boolean) => void; liked: boolean; setLiked: (v: boolean) => void; openVideo: (v: Video) => void;
 }) {
   const related = videos.filter((v) => v.id !== video.id);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => { setPlaying(false); }, [video.id]);
+
   return (
     <div className="container py-8 grid lg:grid-cols-[1fr_360px] gap-8">
       <div className="animate-float-up">
         <div className="relative aspect-video rounded-3xl overflow-hidden bg-black grain group">
-          {video.thumb ? (
-            <img src={video.thumb} alt={video.title} className="w-full h-full object-cover opacity-70" />
+          {playing && video.videoUrl ? (
+            <video src={video.videoUrl} controls autoPlay className="w-full h-full object-contain bg-black" />
           ) : (
-            <div className="w-full h-full" style={{ background: `linear-gradient(135deg, hsl(${video.color} / 0.35), hsl(240 15% 10%))` }} />
-          )}
-          <button className="absolute inset-0 flex items-center justify-center">
-            <span className="w-20 h-20 rounded-full bg-primary flex items-center justify-center glow-lime transition-transform group-hover:scale-110">
-              <Icon name="Play" size={32} className="text-primary-foreground ml-1" />
-            </span>
-          </button>
-          {video.premiere && (
-            <span className="absolute top-4 left-4 flex items-center gap-1 text-sm font-600 px-3 py-1 rounded-full bg-accent text-accent-foreground">
-              <Icon name="Radio" size={14} /> Премьера
-            </span>
+            <>
+              {video.thumb ? (
+                <img src={video.thumb} alt={video.title} className="w-full h-full object-cover opacity-70" />
+              ) : (
+                <div className="w-full h-full" style={{ background: `linear-gradient(135deg, hsl(${video.color} / 0.35), hsl(240 15% 10%))` }} />
+              )}
+              <button
+                onClick={() => video.videoUrl ? setPlaying(true) : toast.error('Файл видео недоступен')}
+                className="absolute inset-0 flex items-center justify-center"
+              >
+                <span className="w-20 h-20 rounded-full bg-primary flex items-center justify-center glow-lime transition-transform group-hover:scale-110">
+                  <Icon name="Play" size={32} className="text-primary-foreground ml-1" />
+                </span>
+              </button>
+              {video.premiere && (
+                <span className="absolute top-4 left-4 flex items-center gap-1 text-sm font-600 px-3 py-1 rounded-full bg-accent text-accent-foreground">
+                  <Icon name="Radio" size={14} /> Премьера
+                </span>
+              )}
+            </>
           )}
         </div>
 
