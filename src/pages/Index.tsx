@@ -1,11 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-
-const THUMB_A = 'https://cdn.poehali.dev/projects/66925adf-f438-4335-a266-f7e32878417f/files/89f4e237-813e-42b4-8fa0-b7122e45707c.jpg';
-const THUMB_B = 'https://cdn.poehali.dev/projects/66925adf-f438-4335-a266-f7e32878417f/files/64bd9702-6c26-4747-8954-951e7f543f43.jpg';
 
 type Screen = 'auth' | 'home' | 'discover' | 'channel' | 'upload' | 'watch';
 
@@ -20,28 +17,15 @@ interface Video {
   premiere?: boolean;
 }
 
-const videos: Video[] = [
-  { id: 1, title: 'Как я снял короткометражку за 24 часа', channel: 'Артур Космос', views: '128K', time: '2 дня назад', thumb: THUMB_A, color: '82 84% 55%' },
-  { id: 2, title: 'Неоновый город: тайм-лапс ночного мегаполиса', channel: 'NightVision', views: '54K', time: '5 часов назад', thumb: THUMB_B, color: '322 90% 60%', premiere: true },
-  { id: 3, title: 'Секреты цветокоррекции для новичков', channel: 'ColorLab', views: '31K', time: '1 неделя назад', thumb: THUMB_A, color: '265 85% 62%' },
-  { id: 4, title: 'Дрон над горами: закат в 4K', channel: 'SkyHunter', views: '212K', time: '3 дня назад', thumb: THUMB_B, color: '82 84% 55%' },
-  { id: 5, title: 'Монтаж без воды — только по делу', channel: 'CutFast', views: '9K', time: 'вчера', thumb: THUMB_A, color: '322 90% 60%' },
-  { id: 6, title: 'Первое видео на канале! Знакомимся', channel: 'НовыйГолос', views: '1.2K', time: '3 часа назад', thumb: THUMB_B, color: '265 85% 62%' },
-];
-
-const channels = [
-  { name: 'Артур Космос', subs: '128K', letter: 'А', color: '82 84% 55%' },
-  { name: 'NightVision', subs: '54K', letter: 'N', color: '322 90% 60%' },
-  { name: 'ColorLab', subs: '31K', letter: 'C', color: '265 85% 62%' },
-  { name: 'НовыйГолос', subs: '1.2K', letter: 'Н', color: '82 84% 55%' },
-];
+const videos: Video[] = [];
+const channels: { name: string; subs: string; letter: string; color: string }[] = [];
 
 export default function Index() {
   const [screen, setScreen] = useState<Screen>('auth');
   const [isLogin, setIsLogin] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
   const [liked, setLiked] = useState(false);
-  const [activeVideo, setActiveVideo] = useState<Video>(videos[0]);
+  const [activeVideo, setActiveVideo] = useState<Video | null>(null);
 
   const nav = [
     { id: 'home', label: 'Главная', icon: 'House' },
@@ -50,18 +34,20 @@ export default function Index() {
     { id: 'upload', label: 'Загрузить', icon: 'Upload' },
   ] as const;
 
+  const openVideo = (v: Video) => { setActiveVideo(v); setScreen('watch'); window.scrollTo(0, 0); };
+
   if (screen === 'auth') return <Auth isLogin={isLogin} setIsLogin={setIsLogin} onEnter={() => setScreen('channel')} />;
 
   return (
     <div className="min-h-screen flex flex-col">
       <Header screen={screen} setScreen={setScreen} nav={nav} onLogout={() => setScreen('auth')} />
       <main className="flex-1">
-        {screen === 'home' && <Home openVideo={(v) => { setActiveVideo(v); setScreen('watch'); }} goChannel={() => setScreen('channel')} />}
-        {screen === 'discover' && <Discover openVideo={(v) => { setActiveVideo(v); setScreen('watch'); }} />}
-        {screen === 'channel' && <Channel goUpload={() => setScreen('upload')} openVideo={(v) => { setActiveVideo(v); setScreen('watch'); }} />}
+        {screen === 'home' && <Home goUpload={() => setScreen('upload')} />}
+        {screen === 'discover' && <Discover />}
+        {screen === 'channel' && <Channel goUpload={() => setScreen('upload')} />}
         {screen === 'upload' && <Upload onDone={() => setScreen('channel')} />}
-        {screen === 'watch' && (
-          <Watch video={activeVideo} subscribed={subscribed} setSubscribed={setSubscribed} liked={liked} setLiked={setLiked} openVideo={(v) => { setActiveVideo(v); window.scrollTo(0, 0); }} />
+        {screen === 'watch' && activeVideo && (
+          <Watch video={activeVideo} subscribed={subscribed} setSubscribed={setSubscribed} liked={liked} setLiked={setLiked} openVideo={openVideo} />
         )}
       </main>
       <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
@@ -84,6 +70,19 @@ function Logo({ size = 'text-2xl' }: { size?: string }) {
   );
 }
 
+function EmptyState({ icon, title, text, action }: { icon: string; title: string; text: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-20 animate-float-up">
+      <div className="w-20 h-20 rounded-3xl bg-muted flex items-center justify-center mb-5 grain">
+        <Icon name={icon} size={32} className="text-muted-foreground" />
+      </div>
+      <h3 className="font-display text-2xl font-600 uppercase">{title}</h3>
+      <p className="text-muted-foreground mt-2 max-w-sm">{text}</p>
+      {action && <div className="mt-6">{action}</div>}
+    </div>
+  );
+}
+
 function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: (v: boolean) => void; onEnter: () => void }) {
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
@@ -98,7 +97,7 @@ function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: 
           </p>
         </div>
         <div className="flex gap-8">
-          {[['12M+', 'зрителей'], ['480K', 'авторов'], ['3.1M', 'видео']].map(([n, l]) => (
+          {[['0', 'зрителей'], ['0', 'авторов'], ['0', 'видео']].map(([n, l]) => (
             <div key={l}>
               <div className="font-display text-3xl text-primary">{n}</div>
               <div className="text-xs text-muted-foreground uppercase tracking-widest">{l}</div>
@@ -191,12 +190,10 @@ function VideoCard({ v, onClick, index = 0 }: { v: Video; onClick: () => void; i
       <div className="relative aspect-video rounded-2xl overflow-hidden bg-muted">
         <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-        {v.premiere ? (
+        {v.premiere && (
           <span className="absolute top-3 left-3 flex items-center gap-1 text-xs font-600 px-2 py-1 rounded-full bg-accent text-accent-foreground">
             <Icon name="Radio" size={12} /> Премьера
           </span>
-        ) : (
-          <span className="absolute bottom-3 right-3 text-xs font-600 px-2 py-0.5 rounded-md bg-black/70 text-white">12:04</span>
         )}
       </div>
       <div className="flex gap-3 mt-3">
@@ -211,42 +208,31 @@ function VideoCard({ v, onClick, index = 0 }: { v: Video; onClick: () => void; i
   );
 }
 
-function Home({ openVideo, goChannel }: { openVideo: (v: Video) => void; goChannel: () => void }) {
+function Home({ goUpload }: { goUpload: () => void }) {
   return (
     <div className="container py-8">
-      <section className="relative rounded-3xl overflow-hidden grain mb-12 animate-float-up cursor-pointer" onClick={() => openVideo(videos[3])}>
-        <img src={THUMB_B} alt="hero" className="w-full h-[42vh] min-h-[280px] object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-background via-background/70 to-transparent" />
-        <div className="absolute inset-0 flex flex-col justify-center p-8 sm:p-14 max-w-2xl">
-          <span className="text-sm font-600 text-primary uppercase tracking-widest mb-3">Рекомендуем сегодня</span>
-          <h1 className="font-display text-4xl sm:text-6xl font-700 uppercase leading-[0.95] mb-4">Дрон над горами: закат в 4K</h1>
-          <p className="text-muted-foreground mb-6">Подобрано по твоей истории просмотров — ты любишь съёмки природы.</p>
-          <Button className="w-fit h-12 px-7 rounded-full font-600 glow-lime"><Icon name="Play" size={18} className="mr-1" />Смотреть</Button>
+      <div className="mb-8 animate-float-up">
+        <span className="text-sm font-600 text-primary uppercase tracking-widest">Главная</span>
+        <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1">Лента рекомендаций</h1>
+      </div>
+
+      {videos.length === 0 ? (
+        <EmptyState
+          icon="Sparkles"
+          title="Пока пусто"
+          text="Здесь появятся видео, подобранные под твои интересы. Загрузи первое видео, чтобы начать."
+          action={<Button onClick={goUpload} className="h-12 px-7 rounded-full font-600 glow-lime"><Icon name="Upload" size={18} className="mr-2" />Загрузить видео</Button>}
+        />
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => {}} />)}
         </div>
-      </section>
-
-      <SectionTitle sub="на основе твоей истории">Рекомендации для тебя</SectionTitle>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-14">
-        {videos.slice(0, 3).map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
-      </div>
-
-      <SectionTitle sub="все свежие ролики">Смотрят прямо сейчас</SectionTitle>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {videos.slice(3).map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
-      </div>
-
-      <div className="mt-14 rounded-3xl border border-border p-8 flex flex-col sm:flex-row items-center justify-between gap-4 grain" style={{ background: 'linear-gradient(120deg, hsl(265 85% 15%), transparent)' }}>
-        <div>
-          <h3 className="font-display text-2xl font-600 uppercase">Готов снимать?</h3>
-          <p className="text-muted-foreground">Загрузи первое видео на свой канал за минуту</p>
-        </div>
-        <Button onClick={goChannel} className="h-12 px-7 rounded-full font-600"><Icon name="Upload" size={18} className="mr-2" />К моему каналу</Button>
-      </div>
+      )}
     </div>
   );
 }
 
-function Discover({ openVideo }: { openVideo: (v: Video) => void }) {
+function Discover() {
   return (
     <div className="container py-8">
       <div className="mb-10 animate-float-up">
@@ -254,31 +240,27 @@ function Discover({ openVideo }: { openVideo: (v: Video) => void }) {
         <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1">Новые каналы и видео</h1>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 mb-12 -mx-2 px-2">
-        {channels.map((c, i) => (
-          <div key={c.name} className="shrink-0 w-44 rounded-3xl border border-border p-5 text-center grain animate-float-up hover:border-primary transition-colors" style={{ animationDelay: `${i * 60}ms` }}>
-            <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center font-display text-2xl font-600" style={{ background: `hsl(${c.color})`, color: '#111' }}>{c.letter}</div>
-            <h3 className="font-600 mt-3 truncate">{c.name}</h3>
-            <p className="text-xs text-muted-foreground mb-3">{c.subs} подписчиков</p>
-            <Button size="sm" className="w-full rounded-full font-600">Подписаться</Button>
-          </div>
-        ))}
-      </div>
-
-      <SectionTitle sub="только что опубликовано">Свежие видео новичков</SectionTitle>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
-      </div>
+      {channels.length === 0 && videos.length === 0 ? (
+        <EmptyState
+          icon="Compass"
+          title="Новых пока нет"
+          text="Как только появятся новые авторы и их первые видео — они будут здесь."
+        />
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => {}} />)}
+        </div>
+      )}
     </div>
   );
 }
 
-function Channel({ goUpload, openVideo }: { goUpload: () => void; openVideo: (v: Video) => void }) {
+function Channel({ goUpload }: { goUpload: () => void }) {
   const stats = [
-    { label: 'Подписчики', value: '128K', icon: 'Users' },
-    { label: 'Подписки', value: '340', icon: 'UserPlus' },
-    { label: 'Лайки', value: '1.4M', icon: 'Heart' },
-    { label: 'Видео', value: '84', icon: 'Video' },
+    { label: 'Подписчики', value: '0', icon: 'Users' },
+    { label: 'Подписки', value: '0', icon: 'UserPlus' },
+    { label: 'Лайки', value: '0', icon: 'Heart' },
+    { label: 'Видео', value: '0', icon: 'Video' },
   ];
   const [tab, setTab] = useState('Видео');
   return (
@@ -289,7 +271,7 @@ function Channel({ goUpload, openVideo }: { goUpload: () => void; openVideo: (v:
           <div className="w-28 h-28 rounded-3xl bg-primary border-4 border-background flex items-center justify-center font-display text-5xl font-700 text-primary-foreground shrink-0">Я</div>
           <div className="flex-1">
             <h1 className="font-display text-4xl font-700 uppercase">Мой канал</h1>
-            <p className="text-muted-foreground">@my_channel · 128K подписчиков · 84 видео</p>
+            <p className="text-muted-foreground">@my_channel · 0 подписчиков · 0 видео</p>
           </div>
           <Button onClick={goUpload} className="h-12 px-6 rounded-full font-600 glow-lime"><Icon name="Upload" size={18} className="mr-2" />Загрузить видео</Button>
         </div>
@@ -313,38 +295,57 @@ function Channel({ goUpload, openVideo }: { goUpload: () => void; openVideo: (v:
           ))}
         </div>
 
-        {tab === 'Видео' && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-8 pb-8">
-            {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
-          </div>
-        )}
-        {tab === 'Подписки' && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 pb-8">
-            {channels.map((c) => (
-              <div key={c.name} className="flex items-center gap-3 rounded-2xl border border-border p-4">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${c.color})`, color: '#111' }}>{c.letter}</div>
-                <div className="flex-1 min-w-0"><p className="font-600 truncate">{c.name}</p><p className="text-xs text-muted-foreground">{c.subs}</p></div>
-                <Button size="sm" variant="outline" className="rounded-full">Вы подписаны</Button>
-              </div>
-            ))}
-          </div>
-        )}
-        {tab === 'Подписчики' && (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 pb-8">
-            {channels.concat(channels).map((c, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-2xl border border-border p-4">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${c.color})`, color: '#111' }}>{c.letter}</div>
-                <div className="flex-1 min-w-0"><p className="font-600 truncate">{c.name}</p><p className="text-xs text-muted-foreground">{c.subs}</p></div>
-              </div>
-            ))}
-          </div>
-        )}
-        {tab === 'О канале' && (
-          <div className="mt-8 pb-8 max-w-2xl text-muted-foreground leading-relaxed">
-            Привет! Здесь я делюсь съёмками природы, монтажом и творческими экспериментами. Новые видео — каждую неделю. Спасибо, что ты со мной на одной волне.
-          </div>
-        )}
+        <div className="pb-8">
+          {tab === 'Видео' && (
+            <EmptyState icon="Video" title="Нет видео" text="Загрузи своё первое видео — оно появится здесь."
+              action={<Button onClick={goUpload} className="h-12 px-7 rounded-full font-600"><Icon name="Upload" size={18} className="mr-2" />Загрузить</Button>} />
+          )}
+          {tab === 'Подписки' && <EmptyState icon="UserPlus" title="Нет подписок" text="Ты ещё ни на кого не подписан. Загляни в раздел «Новое»." />}
+          {tab === 'Подписчики' && <EmptyState icon="Users" title="Нет подписчиков" text="Публикуй видео — и зрители начнут подписываться." />}
+          {tab === 'О канале' && (
+            <div className="mt-8 max-w-2xl text-muted-foreground leading-relaxed">
+              Расскажи о своём канале — этот текст увидят зрители. Пока описание не заполнено.
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function FilePicker({ accept, icon, title, hint, className }: { accept: string; icon: string; title: string; hint: string; className?: string }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFiles = (files: FileList | null) => {
+    if (files && files[0]) setFileName(files[0].name);
+  };
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+      className={`cursor-pointer transition-colors ${dragOver ? 'border-primary bg-primary/10' : 'border-border'} ${className}`}
+    >
+      <input ref={inputRef} type="file" accept={accept} className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+      {fileName ? (
+        <>
+          <Icon name="CircleCheck" size={28} className="text-primary" />
+          <p className="font-600 mt-2 truncate max-w-full px-2">{fileName}</p>
+          <p className="text-xs text-muted-foreground">Нажми, чтобы заменить</p>
+        </>
+      ) : (
+        <>
+          <div className="w-14 h-14 rounded-2xl bg-primary/15 flex items-center justify-center mb-2">
+            <Icon name={icon} size={26} className="text-primary" />
+          </div>
+          <p className="font-600">{title}</p>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -358,22 +359,24 @@ function Upload({ onDone }: { onDone: () => void }) {
         <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1 mb-8">Загрузка видео</h1>
       </div>
 
-      <div className="rounded-3xl border-2 border-dashed border-border p-12 text-center grain hover:border-primary transition-colors cursor-pointer animate-float-up">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 flex items-center justify-center mb-4">
-          <Icon name="CloudUpload" size={28} className="text-primary" />
-        </div>
-        <p className="font-600 text-lg">Перетащи файл видео сюда</p>
-        <p className="text-sm text-muted-foreground mb-4">или выбери с устройства · MP4, MOV до 2 ГБ</p>
-        <Button variant="outline" className="rounded-full"><Icon name="FileVideo" size={16} className="mr-2" />Выбрать файл</Button>
-      </div>
+      <FilePicker
+        accept="video/*"
+        icon="CloudUpload"
+        title="Перетащи файл видео сюда или нажми, чтобы выбрать"
+        hint="MP4, MOV до 2 ГБ"
+        className="rounded-3xl border-2 border-dashed p-12 text-center grain flex flex-col items-center justify-center animate-float-up"
+      />
 
       <div className="grid sm:grid-cols-[200px_1fr] gap-6 mt-8">
         <div>
           <label className="text-sm font-600 mb-2 block">Миниатюра</label>
-          <div className="aspect-video rounded-2xl border-2 border-dashed border-border flex flex-col items-center justify-center text-muted-foreground hover:border-primary transition-colors cursor-pointer">
-            <Icon name="Image" size={24} />
-            <span className="text-xs mt-1">Загрузить</span>
-          </div>
+          <FilePicker
+            accept="image/*"
+            icon="Image"
+            title="Загрузить"
+            hint="JPG, PNG"
+            className="aspect-video rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center"
+          />
         </div>
         <div className="space-y-4">
           <div>
@@ -434,11 +437,6 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
               <Icon name="Play" size={32} className="text-primary-foreground ml-1" />
             </span>
           </button>
-          {video.premiere && (
-            <span className="absolute top-4 left-4 flex items-center gap-1 text-sm font-600 px-3 py-1 rounded-full bg-accent text-accent-foreground">
-              <Icon name="Radio" size={14} /> Премьера · старт через 02:41:18
-            </span>
-          )}
         </div>
 
         <h1 className="font-display text-2xl sm:text-3xl font-600 mt-5 leading-tight">{video.title}</h1>
@@ -449,14 +447,14 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
             <div className="w-11 h-11 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${video.color})`, color: '#111' }}>{video.channel[0]}</div>
             <div>
               <p className="font-600">{video.channel}</p>
-              <p className="text-xs text-muted-foreground">128K подписчиков</p>
+              <p className="text-xs text-muted-foreground">0 подписчиков</p>
             </div>
             <Button onClick={() => setSubscribed(!subscribed)} className={`ml-2 rounded-full font-600 ${subscribed ? 'bg-muted text-foreground hover:bg-muted' : ''}`}>
               {subscribed ? <><Icon name="Check" size={16} className="mr-1" />Вы подписаны</> : 'Подписаться'}
             </Button>
           </div>
           <button onClick={() => setLiked(!liked)} className={`flex items-center gap-2 px-4 py-2 rounded-full font-600 text-sm transition-all ${liked ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}>
-            <Icon name="Heart" size={18} className={liked ? 'fill-current' : ''} /> {liked ? '1.4M' : 'Нравится'}
+            <Icon name="Heart" size={18} className={liked ? 'fill-current' : ''} /> {liked ? '1' : 'Нравится'}
           </button>
           <button className="flex items-center gap-2 px-4 py-2 rounded-full font-600 text-sm bg-muted">
             <Icon name="Share2" size={18} /> Поделиться
@@ -467,26 +465,30 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
         </div>
 
         <div className="mt-5 rounded-2xl bg-muted/50 p-4 text-sm leading-relaxed">
-          Спасибо, что смотришь! В этом видео я показываю весь процесс от идеи до финального монтажа. Ставь лайк и подписывайся, если было полезно — это очень помогает каналу.
+          Описание видео появится здесь.
         </div>
       </div>
 
       <aside>
         <h2 className="font-display text-xl font-600 uppercase mb-4">Смотрите также</h2>
-        <div className="space-y-4">
-          {related.map((v) => (
-            <button key={v.id} onClick={() => openVideo(v)} className="flex gap-3 text-left group w-full">
-              <div className="relative w-40 shrink-0 aspect-video rounded-xl overflow-hidden bg-muted">
-                <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-600 line-clamp-2 group-hover:text-primary transition-colors">{v.title}</h3>
-                <p className="text-xs text-muted-foreground mt-1">{v.channel}</p>
-                <p className="text-xs text-muted-foreground">{v.views} · {v.time}</p>
-              </div>
-            </button>
-          ))}
-        </div>
+        {related.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока нет других видео.</p>
+        ) : (
+          <div className="space-y-4">
+            {related.map((v) => (
+              <button key={v.id} onClick={() => openVideo(v)} className="flex gap-3 text-left group w-full">
+                <div className="relative w-40 shrink-0 aspect-video rounded-xl overflow-hidden bg-muted">
+                  <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-600 line-clamp-2 group-hover:text-primary transition-colors">{v.title}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">{v.channel}</p>
+                  <p className="text-xs text-muted-foreground">{v.views} · {v.time}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </aside>
     </div>
   );
