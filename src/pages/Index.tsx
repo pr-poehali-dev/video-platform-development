@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,16 +9,44 @@ type Screen = 'auth' | 'home' | 'discover' | 'channel' | 'upload' | 'watch';
 interface Video {
   id: number;
   title: string;
+  description: string;
   channel: string;
   views: string;
   time: string;
-  thumb: string;
+  thumb: string | null;
   color: string;
   premiere?: boolean;
+  scheduled?: boolean;
+  publishAt?: string;
 }
 
-const videos: Video[] = [];
-const channels: { name: string; subs: string; letter: string; color: string }[] = [];
+interface Account {
+  channelName: string;
+  email: string;
+  color: string;
+}
+
+const ACCOUNT_KEY = 'volna_account';
+const VIDEOS_KEY = 'volna_videos';
+const PALETTE = ['82 84% 55%', '322 90% 60%', '265 85% 62%'];
+
+function loadAccount(): Account | null {
+  try {
+    const raw = localStorage.getItem(ACCOUNT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadVideos(): Video[] {
+  try {
+    const raw = localStorage.getItem(VIDEOS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function Index() {
   const [screen, setScreen] = useState<Screen>('auth');
@@ -26,6 +54,19 @@ export default function Index() {
   const [subscribed, setSubscribed] = useState(false);
   const [liked, setLiked] = useState(false);
   const [activeVideo, setActiveVideo] = useState<Video | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [checkedSession, setCheckedSession] = useState(false);
+
+  useEffect(() => {
+    const acc = loadAccount();
+    setVideos(loadVideos());
+    if (acc) {
+      setAccount(acc);
+      setScreen('channel');
+    }
+    setCheckedSession(true);
+  }, []);
 
   const nav = [
     { id: 'home', label: 'Главная', icon: 'House' },
@@ -36,18 +77,51 @@ export default function Index() {
 
   const openVideo = (v: Video) => { setActiveVideo(v); setScreen('watch'); window.scrollTo(0, 0); };
 
-  if (screen === 'auth') return <Auth isLogin={isLogin} setIsLogin={setIsLogin} onEnter={() => setScreen('channel')} />;
+  const handleEnter = (form: { channelName: string; email: string }) => {
+    const existing = loadAccount();
+    const acc: Account = {
+      channelName: isLogin ? (existing?.channelName || form.channelName || form.email.split('@')[0]) : form.channelName,
+      email: form.email,
+      color: existing?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    };
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(acc));
+    setAccount(acc);
+    setScreen('channel');
+  };
+
+  const handlePublish = (video: Video) => {
+    setVideos((prev) => {
+      const next = [video, ...prev];
+      localStorage.setItem(VIDEOS_KEY, JSON.stringify(next));
+      return next;
+    });
+    setScreen('channel');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(ACCOUNT_KEY);
+    setAccount(null);
+    setScreen('auth');
+  };
+
+  if (!checkedSession) return null;
+
+  if (screen === 'auth' || !account) {
+    return <Auth isLogin={isLogin} setIsLogin={setIsLogin} onEnter={handleEnter} />;
+  }
+
+  const myVideos = videos.filter((v) => v.channel === account.channelName);
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header screen={screen} setScreen={setScreen} nav={nav} onLogout={() => setScreen('auth')} />
+      <Header screen={screen} setScreen={setScreen} nav={nav} onLogout={handleLogout} account={account} />
       <main className="flex-1">
-        {screen === 'home' && <Home goUpload={() => setScreen('upload')} />}
-        {screen === 'discover' && <Discover />}
-        {screen === 'channel' && <Channel goUpload={() => setScreen('upload')} />}
-        {screen === 'upload' && <Upload onDone={() => setScreen('channel')} />}
+        {screen === 'home' && <Home videos={videos} openVideo={openVideo} goUpload={() => setScreen('upload')} />}
+        {screen === 'discover' && <Discover videos={videos} account={account} openVideo={openVideo} />}
+        {screen === 'channel' && <Channel account={account} myVideos={myVideos} goUpload={() => setScreen('upload')} openVideo={openVideo} />}
+        {screen === 'upload' && <Upload account={account} onPublish={handlePublish} onCancel={() => setScreen('channel')} />}
         {screen === 'watch' && activeVideo && (
-          <Watch video={activeVideo} subscribed={subscribed} setSubscribed={setSubscribed} liked={liked} setLiked={setLiked} openVideo={openVideo} />
+          <Watch video={activeVideo} videos={videos} subscribed={subscribed} setSubscribed={setSubscribed} liked={liked} setLiked={setLiked} openVideo={openVideo} />
         )}
       </main>
       <footer className="border-t border-border py-8 text-center text-sm text-muted-foreground">
@@ -83,7 +157,16 @@ function EmptyState({ icon, title, text, action }: { icon: string; title: string
   );
 }
 
-function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: (v: boolean) => void; onEnter: () => void }) {
+function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: (v: boolean) => void; onEnter: (form: { channelName: string; email: string }) => void }) {
+  const [channelName, setChannelName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const submit = () => {
+    if (!email || !password) return;
+    onEnter({ channelName, email });
+  };
+
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       <div className="relative hidden lg:flex flex-col justify-between p-12 overflow-hidden grain" style={{ background: 'linear-gradient(160deg, hsl(265 85% 20%), hsl(240 15% 6%))' }}>
@@ -119,13 +202,13 @@ function Auth({ isLogin, setIsLogin, onEnter }: { isLogin: boolean; setIsLogin: 
 
           <div className="space-y-4">
             {!isLogin && (
-              <Field icon="AtSign" placeholder="Название канала" />
+              <Field icon="AtSign" placeholder="Название канала" value={channelName} onChange={(e) => setChannelName(e.target.value)} />
             )}
-            <Field icon="Mail" placeholder="Электронная почта" type="email" />
-            <Field icon="Lock" placeholder="Пароль" type="password" />
+            <Field icon="Mail" placeholder="Электронная почта" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Field icon="Lock" placeholder="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
 
-          <Button onClick={onEnter} className="w-full mt-8 py-6 text-base font-600 rounded-xl glow-lime">
+          <Button onClick={submit} className="w-full mt-8 py-6 text-base font-600 rounded-xl glow-lime">
             {isLogin ? 'Войти в канал' : 'Создать канал'}
             <Icon name="ArrowRight" size={18} className="ml-1" />
           </Button>
@@ -152,7 +235,7 @@ function Field({ icon, ...props }: { icon: string } & React.InputHTMLAttributes<
   );
 }
 
-function Header({ screen, setScreen, nav, onLogout }: { screen: Screen; setScreen: (s: Screen) => void; nav: readonly { id: string; label: string; icon: string }[]; onLogout: () => void }) {
+function Header({ screen, setScreen, nav, onLogout, account }: { screen: Screen; setScreen: (s: Screen) => void; nav: readonly { id: string; label: string; icon: string }[]; onLogout: () => void; account: Account }) {
   return (
     <header className="sticky top-0 z-40 backdrop-blur-xl bg-background/80 border-b border-border">
       <div className="container flex items-center gap-6 h-16">
@@ -168,7 +251,9 @@ function Header({ screen, setScreen, nav, onLogout }: { screen: Screen; setScree
               <span className="hidden lg:inline">{n.label}</span>
             </button>
           ))}
-          <button onClick={onLogout} className="ml-2 w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground font-600">Я</button>
+          <button onClick={onLogout} title="Выйти" className="ml-2 w-9 h-9 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${account.color})`, color: '#111' }}>
+            {account.channelName[0]?.toUpperCase() || 'Я'}
+          </button>
         </nav>
       </div>
     </header>
@@ -188,16 +273,27 @@ function VideoCard({ v, onClick, index = 0 }: { v: Video; onClick: () => void; i
   return (
     <button onClick={onClick} className="group text-left animate-float-up" style={{ animationDelay: `${index * 60}ms` }}>
       <div className="relative aspect-video rounded-2xl overflow-hidden bg-muted">
-        <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+        {v.thumb ? (
+          <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center" style={{ background: `linear-gradient(135deg, hsl(${v.color} / 0.35), hsl(240 15% 10%))` }}>
+            <Icon name="Play" size={28} className="text-foreground/40" />
+          </div>
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         {v.premiere && (
           <span className="absolute top-3 left-3 flex items-center gap-1 text-xs font-600 px-2 py-1 rounded-full bg-accent text-accent-foreground">
             <Icon name="Radio" size={12} /> Премьера
           </span>
         )}
+        {v.scheduled && !v.premiere && (
+          <span className="absolute top-3 left-3 flex items-center gap-1 text-xs font-600 px-2 py-1 rounded-full bg-secondary text-secondary-foreground">
+            <Icon name="Clock" size={12} /> Запланировано
+          </span>
+        )}
       </div>
       <div className="flex gap-3 mt-3">
-        <div className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center font-600 text-sm" style={{ background: `hsl(${v.color})`, color: '#111' }}>{v.channel[0]}</div>
+        <div className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center font-600 text-sm" style={{ background: `hsl(${v.color})`, color: '#111' }}>{v.channel[0]?.toUpperCase()}</div>
         <div>
           <h3 className="font-600 leading-snug line-clamp-2 group-hover:text-primary transition-colors">{v.title}</h3>
           <p className="text-sm text-muted-foreground mt-1">{v.channel}</p>
@@ -208,7 +304,7 @@ function VideoCard({ v, onClick, index = 0 }: { v: Video; onClick: () => void; i
   );
 }
 
-function Home({ goUpload }: { goUpload: () => void }) {
+function Home({ videos, openVideo, goUpload }: { videos: Video[]; openVideo: (v: Video) => void; goUpload: () => void }) {
   return (
     <div className="container py-8">
       <div className="mb-8 animate-float-up">
@@ -225,14 +321,15 @@ function Home({ goUpload }: { goUpload: () => void }) {
         />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => {}} />)}
+          {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
         </div>
       )}
     </div>
   );
 }
 
-function Discover() {
+function Discover({ videos, account, openVideo }: { videos: Video[]; account: Account; openVideo: (v: Video) => void }) {
+  const othersVideos = videos.filter((v) => v.channel !== account.channelName);
   return (
     <div className="container py-8">
       <div className="mb-10 animate-float-up">
@@ -240,7 +337,7 @@ function Discover() {
         <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1">Новые каналы и видео</h1>
       </div>
 
-      {channels.length === 0 && videos.length === 0 ? (
+      {othersVideos.length === 0 ? (
         <EmptyState
           icon="Compass"
           title="Новых пока нет"
@@ -248,19 +345,19 @@ function Discover() {
         />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {videos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => {}} />)}
+          {othersVideos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
         </div>
       )}
     </div>
   );
 }
 
-function Channel({ goUpload }: { goUpload: () => void }) {
+function Channel({ account, myVideos, goUpload, openVideo }: { account: Account; myVideos: Video[]; goUpload: () => void; openVideo: (v: Video) => void }) {
   const stats = [
     { label: 'Подписчики', value: '0', icon: 'Users' },
     { label: 'Подписки', value: '0', icon: 'UserPlus' },
     { label: 'Лайки', value: '0', icon: 'Heart' },
-    { label: 'Видео', value: '0', icon: 'Video' },
+    { label: 'Видео', value: String(myVideos.length), icon: 'Video' },
   ];
   const [tab, setTab] = useState('Видео');
   return (
@@ -268,10 +365,12 @@ function Channel({ goUpload }: { goUpload: () => void }) {
       <div className="h-48 sm:h-60 grain relative" style={{ background: 'linear-gradient(120deg, hsl(82 84% 45%), hsl(322 90% 55%), hsl(265 85% 55%))' }} />
       <div className="container -mt-16 relative">
         <div className="flex flex-col sm:flex-row sm:items-end gap-5 animate-float-up">
-          <div className="w-28 h-28 rounded-3xl bg-primary border-4 border-background flex items-center justify-center font-display text-5xl font-700 text-primary-foreground shrink-0">Я</div>
+          <div className="w-28 h-28 rounded-3xl border-4 border-background flex items-center justify-center font-display text-5xl font-700 shrink-0" style={{ background: `hsl(${account.color})`, color: '#111' }}>
+            {account.channelName[0]?.toUpperCase() || 'Я'}
+          </div>
           <div className="flex-1">
-            <h1 className="font-display text-4xl font-700 uppercase">Мой канал</h1>
-            <p className="text-muted-foreground">@my_channel · 0 подписчиков · 0 видео</p>
+            <h1 className="font-display text-4xl font-700 uppercase">{account.channelName}</h1>
+            <p className="text-muted-foreground">{account.email} · 0 подписчиков · {myVideos.length} видео</p>
           </div>
           <Button onClick={goUpload} className="h-12 px-6 rounded-full font-600 glow-lime"><Icon name="Upload" size={18} className="mr-2" />Загрузить видео</Button>
         </div>
@@ -297,8 +396,14 @@ function Channel({ goUpload }: { goUpload: () => void }) {
 
         <div className="pb-8">
           {tab === 'Видео' && (
-            <EmptyState icon="Video" title="Нет видео" text="Загрузи своё первое видео — оно появится здесь."
-              action={<Button onClick={goUpload} className="h-12 px-7 rounded-full font-600"><Icon name="Upload" size={18} className="mr-2" />Загрузить</Button>} />
+            myVideos.length === 0 ? (
+              <EmptyState icon="Video" title="Нет видео" text="Загрузи своё первое видео — оно появится здесь."
+                action={<Button onClick={goUpload} className="h-12 px-7 rounded-full font-600"><Icon name="Upload" size={18} className="mr-2" />Загрузить</Button>} />
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-8">
+                {myVideos.map((v, i) => <VideoCard key={v.id} v={v} index={i} onClick={() => openVideo(v)} />)}
+              </div>
+            )
           )}
           {tab === 'Подписки' && <EmptyState icon="UserPlus" title="Нет подписок" text="Ты ещё ни на кого не подписан. Загляни в раздел «Новое»." />}
           {tab === 'Подписчики' && <EmptyState icon="Users" title="Нет подписчиков" text="Публикуй видео — и зрители начнут подписываться." />}
@@ -313,13 +418,17 @@ function Channel({ goUpload }: { goUpload: () => void }) {
   );
 }
 
-function FilePicker({ accept, icon, title, hint, className }: { accept: string; icon: string; title: string; hint: string; className?: string }) {
+function VideoFilePicker({ onSelect }: { onSelect: (fileName: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
   const [dragOver, setDragOver] = useState(false);
 
   const handleFiles = (files: FileList | null) => {
-    if (files && files[0]) setFileName(files[0].name);
+    const file = files?.[0];
+    if (file) {
+      setFileName(file.name);
+      onSelect(file.name);
+    }
   };
 
   return (
@@ -328,9 +437,9 @@ function FilePicker({ accept, icon, title, hint, className }: { accept: string; 
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
       onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-      className={`cursor-pointer transition-colors ${dragOver ? 'border-primary bg-primary/10' : 'border-border'} ${className}`}
+      className={`cursor-pointer transition-colors rounded-3xl border-2 border-dashed p-12 text-center grain flex flex-col items-center justify-center animate-float-up ${dragOver ? 'border-primary bg-primary/10' : 'border-border'}`}
     >
-      <input ref={inputRef} type="file" accept={accept} className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+      <input ref={inputRef} type="file" accept="video/*" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
       {fileName ? (
         <>
           <Icon name="CircleCheck" size={28} className="text-primary" />
@@ -340,18 +449,88 @@ function FilePicker({ accept, icon, title, hint, className }: { accept: string; 
       ) : (
         <>
           <div className="w-14 h-14 rounded-2xl bg-primary/15 flex items-center justify-center mb-2">
-            <Icon name={icon} size={26} className="text-primary" />
+            <Icon name="CloudUpload" size={26} className="text-primary" />
           </div>
-          <p className="font-600">{title}</p>
-          <p className="text-xs text-muted-foreground">{hint}</p>
+          <p className="font-600">Перетащи файл видео сюда или нажми, чтобы выбрать</p>
+          <p className="text-xs text-muted-foreground">MP4, MOV до 2 ГБ</p>
         </>
       )}
     </div>
   );
 }
 
-function Upload({ onDone }: { onDone: () => void }) {
+function ThumbnailPicker({ onSelect }: { onSelect: (dataUrl: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFiles = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      setPreview(url);
+      onSelect(url);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+      className={`cursor-pointer transition-colors aspect-video rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center overflow-hidden relative ${dragOver ? 'border-primary bg-primary/10' : 'border-border'}`}
+    >
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+      {preview ? (
+        <>
+          <img src={preview} alt="Миниатюра" className="absolute inset-0 w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+            <span className="text-xs font-600 text-white">Заменить</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="w-14 h-14 rounded-2xl bg-primary/15 flex items-center justify-center mb-2">
+            <Icon name="Image" size={26} className="text-primary" />
+          </div>
+          <p className="font-600">Загрузить</p>
+          <p className="text-xs text-muted-foreground">JPG, PNG</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Upload({ account, onPublish, onCancel }: { account: Account; onPublish: (v: Video) => void; onCancel: () => void }) {
   const [mode, setMode] = useState<'now' | 'schedule' | 'premiere'>('now');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [thumb, setThumb] = useState<string | null>(null);
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+
+  const publish = () => {
+    if (!title.trim()) return;
+    const video: Video = {
+      id: Date.now(),
+      title: title.trim(),
+      description: description.trim(),
+      channel: account.channelName,
+      views: '0',
+      time: mode === 'now' ? 'только что' : date && time ? `${date} в ${time}` : 'скоро',
+      thumb,
+      color: account.color,
+      premiere: mode === 'premiere',
+      scheduled: mode === 'schedule',
+      publishAt: mode !== 'now' ? `${date} ${time}`.trim() : undefined,
+    };
+    onPublish(video);
+  };
+
   return (
     <div className="container py-8 max-w-3xl">
       <div className="animate-float-up">
@@ -359,33 +538,21 @@ function Upload({ onDone }: { onDone: () => void }) {
         <h1 className="font-display text-4xl sm:text-5xl font-700 uppercase mt-1 mb-8">Загрузка видео</h1>
       </div>
 
-      <FilePicker
-        accept="video/*"
-        icon="CloudUpload"
-        title="Перетащи файл видео сюда или нажми, чтобы выбрать"
-        hint="MP4, MOV до 2 ГБ"
-        className="rounded-3xl border-2 border-dashed p-12 text-center grain flex flex-col items-center justify-center animate-float-up"
-      />
+      <VideoFilePicker onSelect={() => {}} />
 
       <div className="grid sm:grid-cols-[200px_1fr] gap-6 mt-8">
         <div>
           <label className="text-sm font-600 mb-2 block">Миниатюра</label>
-          <FilePicker
-            accept="image/*"
-            icon="Image"
-            title="Загрузить"
-            hint="JPG, PNG"
-            className="aspect-video rounded-2xl border-2 border-dashed flex flex-col items-center justify-center text-center"
-          />
+          <ThumbnailPicker onSelect={setThumb} />
         </div>
         <div className="space-y-4">
           <div>
             <label className="text-sm font-600 mb-2 block">Название видео</label>
-            <Input placeholder="Придумай цепляющий заголовок" className="h-12 rounded-xl bg-muted border-border" />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Придумай цепляющий заголовок" className="h-12 rounded-xl bg-muted border-border" />
           </div>
           <div>
             <label className="text-sm font-600 mb-2 block">Описание</label>
-            <Textarea placeholder="Расскажи, о чём это видео..." className="min-h-28 rounded-xl bg-muted border-border resize-none" />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Расскажи, о чём это видео..." className="min-h-28 rounded-xl bg-muted border-border resize-none" />
           </div>
         </div>
       </div>
@@ -407,36 +574,45 @@ function Upload({ onDone }: { onDone: () => void }) {
         </div>
         {mode !== 'now' && (
           <div className="grid grid-cols-2 gap-3 mt-4 animate-float-up">
-            <Input type="date" className="h-12 rounded-xl bg-muted border-border" />
-            <Input type="time" className="h-12 rounded-xl bg-muted border-border" />
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-12 rounded-xl bg-muted border-border" />
+            <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="h-12 rounded-xl bg-muted border-border" />
           </div>
         )}
       </div>
 
       <div className="flex gap-3 mt-10">
-        <Button onClick={onDone} className="flex-1 py-6 rounded-xl font-600 glow-lime">
+        <Button onClick={publish} className="flex-1 py-6 rounded-xl font-600 glow-lime">
           {mode === 'premiere' ? 'Запланировать премьеру' : mode === 'schedule' ? 'Запланировать публикацию' : 'Опубликовать сейчас'}
         </Button>
-        <Button variant="outline" onClick={onDone} className="py-6 px-6 rounded-xl">Отмена</Button>
+        <Button variant="outline" onClick={onCancel} className="py-6 px-6 rounded-xl">Отмена</Button>
       </div>
     </div>
   );
 }
 
-function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }: {
-  video: Video; subscribed: boolean; setSubscribed: (v: boolean) => void; liked: boolean; setLiked: (v: boolean) => void; openVideo: (v: Video) => void;
+function Watch({ video, videos, subscribed, setSubscribed, liked, setLiked, openVideo }: {
+  video: Video; videos: Video[]; subscribed: boolean; setSubscribed: (v: boolean) => void; liked: boolean; setLiked: (v: boolean) => void; openVideo: (v: Video) => void;
 }) {
   const related = videos.filter((v) => v.id !== video.id);
   return (
     <div className="container py-8 grid lg:grid-cols-[1fr_360px] gap-8">
       <div className="animate-float-up">
         <div className="relative aspect-video rounded-3xl overflow-hidden bg-black grain group">
-          <img src={video.thumb} alt={video.title} className="w-full h-full object-cover opacity-70" />
+          {video.thumb ? (
+            <img src={video.thumb} alt={video.title} className="w-full h-full object-cover opacity-70" />
+          ) : (
+            <div className="w-full h-full" style={{ background: `linear-gradient(135deg, hsl(${video.color} / 0.35), hsl(240 15% 10%))` }} />
+          )}
           <button className="absolute inset-0 flex items-center justify-center">
             <span className="w-20 h-20 rounded-full bg-primary flex items-center justify-center glow-lime transition-transform group-hover:scale-110">
               <Icon name="Play" size={32} className="text-primary-foreground ml-1" />
             </span>
           </button>
+          {video.premiere && (
+            <span className="absolute top-4 left-4 flex items-center gap-1 text-sm font-600 px-3 py-1 rounded-full bg-accent text-accent-foreground">
+              <Icon name="Radio" size={14} /> Премьера
+            </span>
+          )}
         </div>
 
         <h1 className="font-display text-2xl sm:text-3xl font-600 mt-5 leading-tight">{video.title}</h1>
@@ -444,7 +620,7 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
 
         <div className="flex flex-wrap items-center gap-3 mt-4 pb-6 border-b border-border">
           <div className="flex items-center gap-3 mr-auto">
-            <div className="w-11 h-11 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${video.color})`, color: '#111' }}>{video.channel[0]}</div>
+            <div className="w-11 h-11 rounded-full flex items-center justify-center font-600" style={{ background: `hsl(${video.color})`, color: '#111' }}>{video.channel[0]?.toUpperCase()}</div>
             <div>
               <p className="font-600">{video.channel}</p>
               <p className="text-xs text-muted-foreground">0 подписчиков</p>
@@ -465,7 +641,7 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
         </div>
 
         <div className="mt-5 rounded-2xl bg-muted/50 p-4 text-sm leading-relaxed">
-          Описание видео появится здесь.
+          {video.description || 'Описание видео появится здесь.'}
         </div>
       </div>
 
@@ -478,7 +654,13 @@ function Watch({ video, subscribed, setSubscribed, liked, setLiked, openVideo }:
             {related.map((v) => (
               <button key={v.id} onClick={() => openVideo(v)} className="flex gap-3 text-left group w-full">
                 <div className="relative w-40 shrink-0 aspect-video rounded-xl overflow-hidden bg-muted">
-                  <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                  {v.thumb ? (
+                    <img src={v.thumb} alt={v.title} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center" style={{ background: `linear-gradient(135deg, hsl(${v.color} / 0.35), hsl(240 15% 10%))` }}>
+                      <Icon name="Play" size={18} className="text-foreground/40" />
+                    </div>
+                  )}
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm font-600 line-clamp-2 group-hover:text-primary transition-colors">{v.title}</h3>
